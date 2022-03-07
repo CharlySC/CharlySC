@@ -7,8 +7,10 @@ Vega <- function(s,r,q,K,tau,sigma){
 Heston <- function(tipo,s,K,tau,r,q,v,theta,rho,kappa,sigma){
   p <- callHestoncf(s,K,tau,r,q,v,theta,rho,kappa,sigma)
   if(tipo==1){
+    # para call
     precio <- p 
   }else if(tipo==-1){
+    # para put
     precio <- p - (s*exp(-q*tau)-K*exp(-r*tau)) 
   }
   return(precio)
@@ -21,6 +23,8 @@ Perdida <- function(parametros){
   sigma <- parametros[3]
   kappa <- parametros[4]
   
+  # Se utiliza el data frame PreciosBS,
+  # el cual incluye curvas de descuento, precios, strikes y volatilidades
   precios_bs <- PreciosBS[which(PreciosBS$dias==dia),2:length(PreciosBS)]
   precios_heston <- numeric(length(precios_bs))
   vega <- numeric(length(precios_bs))
