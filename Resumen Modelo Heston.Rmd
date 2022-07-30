@@ -1,0 +1,307 @@
+---
+title: El Modelo Heston
+author: https://github.com/CharlySC
+date: 'Última fecha de modificación: `r Sys.Date()`'
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_float: true
+    number_sections: true
+    theme: readable
+    code_folding: show
+subtitle: Carlos Adrián Sandoval Cuenca
+header_includes:
+- \usepackage{amsmath}
+- \usepackage{amssymb}
+- \usepackage{amsthm}
+toc-title: Contenido
+---
+
+```{r global_options, include=FALSE,warning=FALSE}
+knitr::opts_chunk$set(comment = NA,warning = FALSE,echo=FALSE)
+```
+\pagenumbering{gobble}
+```{r, include=FALSE}
+###### Paqueterias y Funciones
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(ggpubr)
+library(NMOF)
+library(DEoptim)
+library(RQuantLib)
+```
+
+Este articulo es un resumen sobre mi tesis de licenciatura titulada "Valuación de Opciones con Volatilidad Estocástica. El Modelo Heston", en el cual se realizó una calibración del modelo Heston con cotizaciones de opciones USDMXN. Dicha calibración se llevó a cabo usando el método *Differential Evolution*, el cual sirve encontrar los mínimos globales de funciones no lineales de varias variables.
+
+# El modelo de Black-Scholes
+
+El modelo de Black-Scholes (B-S) se basa en los siguientes supuestos del mercado: 
+* Los participantes del mercado son entes racionales.
+* La competencia del mercado es perfecta.
+* El subyacente no paga dividendos y su precio sigue un movimiento Browniano geométrico.
+* Es posible comprar, vender y pedir prestado (venta en corto) cualquier cantidad (no necesariamente entera) del subyacente en cualquier instante de tiempo, sin costos de transacción.
+* La tasa de interés libre de riesgo y la volatilidad son constantes en el tiempo.
+
+La primera suposición es equivalente a que no existen oportunidades de arbitraje, pues de existir, los participantes racionales las tomarían y por oferta y demanda su precio se estabilizaría en un punto de equilibrio, el cual correspondería con el precio justo. La segunda suposición significa que todos los participantes tienen acceso a la misma información y los precios son iguales para todos, además nadie puede influir en los precios para modificarlos a su conveniencia.
+
+Puesto que el enfoque de este trabajo son las opciones de tipo de cambio, presentaremos el modelo de B-S para opciones de tipo de cambio (también conocido como modelo de Garman-Kohlhagen) donde se incorpora una tasa libre de riesgo extranjera $r_f$ (la cual puede verse como incluir dividendos en el subyacente a tasa continua), mientras que $r_d$ representará la tasa libre de riesgo local. El subyacente en este caso será el tipo de cambio $S(t)$ para los pares XXXYYY, donde XXX es la divisa extranjera (por ejemplo USD), y YYY representa la divisa local (por ejemplo MXN), entendiéndose que una unidad de moneda extranjera XXX a tiempo $t$ vale $S(t)$ unidades de moneda local YYY.
+Debido a la existencia de la tasa extranjera, si el día de hoy compraramos una unidad de moneda extranjera $S(0)$, a tiempo $t$ el activo valdría $e^{r_ft}S(t)$ unidades de la moneda local. Si denotamos por $Y(t)=e^{r_ft}S(t)$, el cual representa el valor de la cuenta de mercado de dinero extranjera en moneda local, entonces usando la dinámica del tipo de cambio $S(t)$ y la regla del producto de Itô encontramos que 
+\begin{align*}
+dY(t) &= e^{r_ft}dS(t)+S(t)de^{r_ft} \\
+&= e^{r_ft}(\mu S(t)dt+\sigma S(t)dW(t))+r_fe^{r_ft}S(t)dt
+\end{align*}
+\begin{equation}
+\therefore \quad dY(t)=(\mu + r_f)Y(t)dt+\sigma Y(t)dW(t). \label{C1:dY}
+\end{equation}
+
+# Movimiento Browniano
+
+**Definición 1 (Movimiento Browniano)** Sea $\mathbb{T} = [0,T]$, con $T>0$. Un movimiento Browniano es un procesos estocástico $\{W(t)\}_{t\in\mathbb{T}}$ que satisface:
+
+1. $W(0)=0$ $\mathbb{P}$-c.s.
+2. Tiene trayectorias continuas. 
+3. Tiene incrementos independientes, es decir, $W(t)-W(s)$ es independiente de $\mathcal{F}_s$ para toda $s<t$.
+4. Tiene incrementos estacionarios con $W(t)-W(s)\sim N(0,t-s)$ para toda $s<t$.
+
+Para simular un movimiento browniano, tomamos una partición uniforme $0=t_0<\ldots<t_N=T$ del intervalo $\mathbb{T}$ donde $t_{i+1}-t_i=T/N$, para toda $i\in\{0,\ldots,N-1\}$ y observamos que
+\begin{equation}
+W(t_n) = \sum_{i=0}^{n-1} W(t_{i+1})-W(t_i)
+\end{equation}
+donde $W(t_{i+1})-W(t_i)\sim N(0,t_{i+1}-t_i)\sim N(0,T/N)$.
+
+## Movimiento Browniano con Drift
+
+La primer modificación del movimiento Browniano consiste en incluir una tendencia (drift) $\mu$ controla la dirección hacia donde se mueve el Browniano y una volatilidad $\sigma$ que controla el tamaño de las variaciones del Browniano
+
+\begin{equation}
+S(t) = S(0) + \mu t + \sigma W(t)
+\end{equation}
+
+El problema al usar este modelo es que $\mathbb{P}(S(t)\leq0)>0$-c.s. por lo que si se emplea para modelar el precio de algún activo, se podría incurrir en precios negativos.
+
+## Movimiento Browniano Geométrico
+
+La forma más fácil de corregir el problema anterior es aplicarle una función que sea positiva, lo cual nos lleva al movimiento Browniano Geométrico
+
+\begin{equation}
+S(t) = S(0)\exp \left\lbrace \mu t + \sigma W(t) \right\rbrace
+\end{equation}
+
+A continuación se muestra una comparativa entre los diferentes movimientos Brownianos con $N=1000$ puntos de la partición
+
+```{r, echo=TRUE}
+##### Comparacion entre movimientos brownianos #####
+
+# Funcion para browniano estandar
+brown <- function(n,t){
+  z <- rnorm(n)
+  z <- sqrt(t/n)*z
+  w <- c(0,cumsum(z))
+  return(w)
+}
+
+# Funcion para browniano con drift
+brown_drift <- function(n,t,s0,mu,sigma){
+  z <- rnorm(n)
+  z <- sqrt(t/n)*z
+  w <- c(0,cumsum(z))
+  t <- seq(0,t,by=t/n)
+  s <- s0+mu*t+sigma*w
+  return(s)
+}
+
+# Funcion para browniano geometrico
+brown_geom <- function(n,t,s0,mu,sigma){
+  z <- rnorm(n)
+  z <- sqrt(t/n)*z
+  w <- c(0,cumsum(z))
+  t <- seq(0,t,by=t/n)
+  s <- s0*exp(mu*t+sigma*w)
+  return(s)
+}
+
+# Movimientos Brownianos con tendencia positiva
+n <- 1000
+t <- seq(0,1,1/n)
+s0 <- 1
+mu <- -.9
+sigma <- .8
+seed <- 987654
+  
+set.seed(seed)
+s1 <- brown(n,1)
+
+set.seed(seed)
+s2 <- brown_drift(n,1,s0,mu,sigma)
+
+set.seed(seed)
+s3 <- brown_geom(n,1,s0,mu,sigma)
+
+Simulaciones <- data.frame(tiempo=t,
+                           Estandar=s1,
+                           Drift=s2,
+                           Geometrico=s3)
+
+Simulaciones <- gather(Simulaciones,tipo,valor,-tiempo)
+ggplot(Simulaciones,aes(x=tiempo,y=valor,col=tipo)) +
+  geom_line() +
+  labs(title="Comparación Movimientos Brownianos",subtitle="Tendencia a la baja")
+
+# Movimientos Brownianos con tendencia positiva
+mu <- .9 
+seed <- 987654
+
+set.seed(seed)
+s1 <- brown(n,1)
+
+set.seed(seed)
+s2 <- brown_drift(n,1,s0,mu,sigma)
+
+set.seed(seed)
+s3 <- brown_geom(n,1,s0,mu,sigma)
+
+Simulaciones <- data.frame(tiempo=t,
+                           Estandar=s1,
+                           Drift=s2,
+                           Geometrico=s3)
+
+Simulaciones <- gather(Simulaciones,tipo,valor,-tiempo)
+ggplot(Simulaciones,aes(x=tiempo,y=valor,col=tipo)) +
+  geom_line() +
+  labs(title="Comparación Movimientos Brownianos",subtitle="Tendencia a la alza")
+
+```
+
+
+# El modelo de Black-Scholes
+
+El modelo de Black-Scholes (B-S) fue propuesto por el físico y economista Fischer Black y el economista Myron Scholes y posteriormente fue formalizado a través del cálculo estocástico por Robert Merton. El modelo brinda el precio de una opción financiera el cual está dado por la ecuación
+
+\begin{align}
+BS(S,K,\tau,r,q,\sigma,\phi) &= \phi Se^{-q\tau}N(\phi d_1) - \phi Ke^{-r\tau}N(\phi d_2) \\
+d_1 &= \frac{1}{\sigma\sqrt{\tau}}\left( \log\left( \frac{S}{K}\right) +\left( r-q+\frac{1}{2}\sigma^2 \right) \tau \right), \\
+ d_2 &= d_1 - \sigma\sqrt{\tau}
+\end{align}
+donde
+
+* $S$: Precio spot del subyacente.
+* $K$: Precio strike pactado.
+* $\tau$: Años por vencer de la opción.
+* $r$: Tasa de descuento doméstica.
+* $q$: Tasa de descuento extranjera (Tasa de dividendos).
+* $\sigma$: Volatilidad anual.
+* $\phi$: Indicadora igual a 1 si es call y a -1 si es put.
+
+Para llegar a esta fórmula, se parte de los siguientes supuestos
+
+* Los participantes del mercado son entes racionales.
+* La competencia del mercado es perfecta.
+* El subyacente no paga dividendos y su precio sigue un movimiento Browniano geométrico.
+* Es posible comprar, vender y pedir prestado (venta en corto) cualquier cantidad (no necesariamente entera) del subyacente en cualquier instante de tiempo, sin costos de transacción.
+* La tasa de interés libre de riesgo y la volatilidad son constantes en el tiempo.
+
+Bajo la medida de riesgo neutral $\mathbb{\widetilde{P}}$ e incluyendo dividendos, se sigue que el subyacente sigue la EDE
+\begin{equation}
+dS(t)=(r-q)S(t)dt+\sigma d\widetilde{W}(t),
+\end{equation}
+donde $\widetilde{W}(t)$ es un movimiento browniano bajo $\mathbb{\widetilde{P}}$.
+
+El precio de la opción está dado por la fórmula de valuación de riesgo neutral
+\begin{equation}
+\mathbb{\widetilde{E}}(e^{-r(T-t)}X(T)\mid \mathcal{F}_t)
+\end{equation}
+donde la esperanza se calcula bajo $\mathbb{\widetilde{P}}$, $N(x)$ es la función de distribución de una $N(0,1)$ y $X(T)$ es el payoff del derivado.
+
+```{r}
+######## Simulacion Trayectoria ########
+n <- 1000
+t <- seq(0,1,1/n)
+s0 <- 100
+mu <- -.05
+sigma <- .5
+k <- 100
+set.seed(456789)
+
+Simulacion <- data.frame(Tiempo=t,Subyacente=brown_geom(n,1,s0,mu,sigma))
+S <- Simulacion$Subyacente[nrow(Simulacion)]
+ggplot(Simulacion,aes(x=Tiempo,y=Subyacente)) +
+  geom_line() +
+  labs(title="Simulacion trayectoria") +
+  geom_hline(aes(yintercept = k,color="Strike")) +
+  geom_hline(aes(yintercept = S,color="S(T)")) +
+  theme(legend.title = element_blank(),legend.position = "bottom")
+
+```
+
+Definimos el *Payoff* de un derivado como el valor intrinseco del derivado en el momento de ser ejercido y el cual puede ser visto como una función del subyacente $X(T)=h(S(T))$.
+
+```{r}
+######## Payoffs Opciones Vanilla ########
+
+s <- c(k-1:round(k/2),k,k+1:round(k/2))
+
+# Call largo
+X <- pmax(s-k,0)
+Grafica <- data.frame(Subyacente=s,Payoff=X)
+p1 <- ggplot(Grafica,aes(x=Subyacente,y=Payoff)) +
+  geom_line() +
+  labs(title="Payoff Call",subtitle = "Largo") +
+  geom_vline(aes(xintercept = k,color="Strike")) +
+  geom_vline(aes(xintercept = S,color="S(T)")) +
+  geom_label(aes(x = k, y = mean(X)*2, label = "ATM")) +
+  geom_label(aes(x = max(s)-(max(s)-k)/4, y = mean(X)*2, label = "ITM")) +
+  geom_label(aes(x = min(s)+(k-min(s))/4, y = mean(X)*2, label = "OTM")) +
+  theme(legend.title = element_blank(),legend.position = "bottom")
+
+# Call corto
+X <- -pmax(s-k,0)
+Grafica <- data.frame(Subyacente=s,Payoff=X)
+p2 <- ggplot(Grafica,aes(x=Subyacente,y=Payoff)) +
+  geom_line() +
+  labs(title="Payoff Call",subtitle = "Corto") +
+  geom_vline(aes(xintercept = k,color="Strike")) +
+  geom_vline(aes(xintercept = S,color="S(T)")) +
+  geom_label(aes(x = k, y = mean(X)*2, label = "ATM")) +
+  geom_label(aes(x = max(s)-(max(s)-k)/4, y = mean(X)*2, label = "ITM")) +
+  geom_label(aes(x = min(s)+(k-min(s))/4, y = mean(X)*2, label = "OTM")) +
+  theme(legend.title = element_blank(),legend.position = "bottom")
+
+# Put largo
+X <- pmax(k-s,0)
+Grafica <- data.frame(Subyacente=s,Payoff=X)
+p3 <- ggplot(Grafica,aes(x=Subyacente,y=Payoff)) +
+  geom_line() +
+  labs(title="Payoff Put",subtitle = "Largo") +
+  geom_vline(aes(xintercept = k,color="Strike")) +
+  geom_vline(aes(xintercept = S,color="S(T)")) +
+  geom_label(aes(x = k, y = mean(X)*2, label = "ATM")) +
+  geom_label(aes(x = max(s)-(max(s)-k)/4, y = mean(X)*2, label = "OTM")) +
+  geom_label(aes(x = min(s)+(k-min(s))/4, y = mean(X)*2, label = "ITM")) +
+  theme(legend.title = element_blank(),legend.position = "bottom")
+
+# Put corto
+X <- -pmax(k-s,0)
+Grafica <- data.frame(Subyacente=s,Payoff=X)
+p4 <- ggplot(Grafica,aes(x=Subyacente,y=Payoff)) +
+  geom_line() +
+  labs(title="Payoff Put",subtitle = "Corto") +
+  geom_vline(aes(xintercept = k,color="Strike")) +
+  geom_vline(aes(xintercept = S,color="S(T)")) +
+  geom_label(aes(x = k, y = mean(X)*2, label = "ATM")) +
+  geom_label(aes(x = max(s)-(max(s)-k)/4, y = mean(X)*2, label = "OTM")) +
+  geom_label(aes(x = min(s)+(k-min(s))/4, y = mean(X)*2, label = "ITM")) +
+  theme(legend.title = element_blank(),legend.position = "bottom")
+
+ggarrange(p1,p2,p3,p4,ncol = 2,nrow = 2)
+```
+
+# Bibliografía
+
+* Karatzas, I. and Shreve, S. (1991) *Brownian Motion and Stochastic Calculus*, Springer-Verlag, New York.
+* Kloeden, P. and Platen, E. (1995) *Numerical solution of stochastic differential equations*, Springer-Verlag, New York.
+* Hull, J. (2018) *Options, Futures and other Derivative Securities*, 10th edition, Pearson, New York.
+* *Shreve, S. (2004) Stochastic Calculus for Finance II: Continuous-Time Models*, Springer-Verlag, New York.
+* Wystup, U. (2017) *FX Options and Structure Products*, Wiley, United Kingdom.
