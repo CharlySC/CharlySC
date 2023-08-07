@@ -34,30 +34,15 @@ library(DEoptim)
 library(RQuantLib)
 ```
 
-Este articulo es un resumen sobre mi tesis de licenciatura titulada "Valuación de Opciones con Volatilidad Estocástica. El Modelo Heston", en el cual se realizó una calibración del modelo Heston con cotizaciones de opciones USDMXN. Dicha calibración se llevó a cabo usando el método *Differential Evolution*, el cual sirve encontrar los mínimos globales de funciones no lineales de varias variables.
+# Introducción
+
+Este articulo es un resumen sobre mi tesis de licenciatura titulada "Valuación de Opciones con Volatilidad Estocástica. El Modelo Heston", en el cual se realizó una calibración del modelo Heston con cotizaciones de opciones USDMXN. Dicha calibración se llevó a cabo usando el método *Differential Evolution*, el cual sirve para encontrar los mínimos globales de funciones no lineales de varias variables.
 
 # El modelo de Black-Scholes
 
-El modelo de Black-Scholes (B-S) se basa en los siguientes supuestos del mercado: 
-* Los participantes del mercado son entes racionales.
-* La competencia del mercado es perfecta.
-* El subyacente no paga dividendos y su precio sigue un movimiento Browniano geométrico.
-* Es posible comprar, vender y pedir prestado (venta en corto) cualquier cantidad (no necesariamente entera) del subyacente en cualquier instante de tiempo, sin costos de transacción.
-* La tasa de interés libre de riesgo y la volatilidad son constantes en el tiempo.
+El modelo de mercado puede describirse mediante dos instrumentos financieros: un activo riesgoso y un activo libre de riesgo. A lo largo de la tesis, $\mathbb{T}$ denotará el intervalo de tiempo $[0, T]$ con horizonte de tiempo $T > 0$.
 
-La primera suposición es equivalente a que no existen oportunidades de arbitraje, pues de existir, los participantes racionales las tomarían y por oferta y demanda su precio se estabilizaría en un punto de equilibrio, el cual correspondería con el precio justo. La segunda suposición significa que todos los participantes tienen acceso a la misma información y los precios son iguales para todos, además nadie puede influir en los precios para modificarlos a su conveniencia.
-
-Puesto que el enfoque de este trabajo son las opciones de tipo de cambio, presentaremos el modelo de B-S para opciones de tipo de cambio (también conocido como modelo de Garman-Kohlhagen) donde se incorpora una tasa libre de riesgo extranjera $r_f$ (la cual puede verse como incluir dividendos en el subyacente a tasa continua), mientras que $r_d$ representará la tasa libre de riesgo local. El subyacente en este caso será el tipo de cambio $S(t)$ para los pares XXXYYY, donde XXX es la divisa extranjera (por ejemplo USD), y YYY representa la divisa local (por ejemplo MXN), entendiéndose que una unidad de moneda extranjera XXX a tiempo $t$ vale $S(t)$ unidades de moneda local YYY.
-Debido a la existencia de la tasa extranjera, si el día de hoy compraramos una unidad de moneda extranjera $S(0)$, a tiempo $t$ el activo valdría $e^{r_ft}S(t)$ unidades de la moneda local. Si denotamos por $Y(t)=e^{r_ft}S(t)$, el cual representa el valor de la cuenta de mercado de dinero extranjera en moneda local, entonces usando la dinámica del tipo de cambio $S(t)$ y la regla del producto de Itô encontramos que 
-\begin{align*}
-dY(t) &= e^{r_ft}dS(t)+S(t)de^{r_ft} \\
-&= e^{r_ft}(\mu S(t)dt+\sigma S(t)dW(t))+r_fe^{r_ft}S(t)dt
-\end{align*}
-\begin{equation}
-\therefore \quad dY(t)=(\mu + r_f)Y(t)dt+\sigma Y(t)dW(t). \label{C1:dY}
-\end{equation}
-
-# Movimiento Browniano
+## Conceptos y fundamentos
 
 **Definición 1 (Movimiento Browniano)** Sea $\mathbb{T} = [0,T]$, con $T>0$. Un movimiento Browniano es un procesos estocástico $\{W(t)\}_{t\in\mathbb{T}}$ que satisface:
 
@@ -66,19 +51,14 @@ dY(t) &= e^{r_ft}dS(t)+S(t)de^{r_ft} \\
 3. Tiene incrementos independientes, es decir, $W(t)-W(s)$ es independiente de $\mathcal{F}_s$ para toda $s<t$.
 4. Tiene incrementos estacionarios con $W(t)-W(s)\sim N(0,t-s)$ para toda $s<t$.
 
-Para simular un movimiento browniano, tomamos una partición uniforme $0=t_0<\ldots<t_N=T$ del intervalo $\mathbb{T}$ donde $t_{i+1}-t_i=T/N$, para toda $i\in\{0,\ldots,N-1\}$ y observamos que
-\begin{equation}
-W(t_n) = \sum_{i=0}^{n-1} W(t_{i+1})-W(t_i)
-\end{equation}
+Para simular un movimiento browniano, tomamos una partición uniforme $0=t_0<\ldots<t_N=T$ del intervalo $\mathbb{T}$ donde $t_{i+1}-t_i=T/N$, para toda $i\in\{0,\ldots,N-1\}$ y observamos que $$W(t_n) = \sum_{i=0}^{n-1} W(t_{i+1})-W(t_i)$$
 donde $W(t_{i+1})-W(t_i)\sim N(0,t_{i+1}-t_i)\sim N(0,T/N)$.
 
 ## Movimiento Browniano con Drift
 
 La primer modificación del movimiento Browniano consiste en incluir una tendencia (drift) $\mu$ controla la dirección hacia donde se mueve el Browniano y una volatilidad $\sigma$ que controla el tamaño de las variaciones del Browniano
 
-\begin{equation}
-S(t) = S(0) + \mu t + \sigma W(t)
-\end{equation}
+$$S(t) = S(0) + \mu t + \sigma W(t)$$
 
 El problema al usar este modelo es que $\mathbb{P}(S(t)\leq0)>0$-c.s. por lo que si se emplea para modelar el precio de algún activo, se podría incurrir en precios negativos.
 
@@ -86,9 +66,7 @@ El problema al usar este modelo es que $\mathbb{P}(S(t)\leq0)>0$-c.s. por lo que
 
 La forma más fácil de corregir el problema anterior es aplicarle una función que sea positiva, lo cual nos lleva al movimiento Browniano Geométrico
 
-\begin{equation}
-S(t) = S(0)\exp \left\lbrace \mu t + \sigma W(t) \right\rbrace
-\end{equation}
+$$S(t) = S(0)\exp \left\lbrace \mu t + \sigma W(t) \right\rbrace$$
 
 A continuación se muestra una comparativa entre los diferentes movimientos Brownianos con $N=1000$ puntos de la partición
 
@@ -176,6 +154,38 @@ ggplot(Simulaciones,aes(x=tiempo,y=valor,col=tipo)) +
 ```
 
 
+**Definición (Cuenta de Mercado de Dinero)** Definimos la cuenta de mercado de dinero (o activo libre de riesgo) a través del proceso $\left\lbrace B(t)\right\rbrace _{t\in \mathbb{T}}$, el cual satisface $$dB(t)=r(t)B(t)dt, \qquad B(0)=1$$ o equivalentemente $$B(t)=e^{\int_0^t{r(s)}ds}, \label{C1:cuenta_mercado}$$
+donde ${r(t)}_{t\in \mathbb{T}}$ es la *tasa libre de riesgo*, la cual puede ser determinista o estocástica pero debe de ser $\mathcal{F}_t$ medible.
+
+En su forma más elemental, consideramos la tasa libre de riesgo como una constante $r$, de forma que $B(t)=e^{rt}$. El proceso $B(t)$ representa el valor de una unidad monetaria en un tiempo futuro $t$.
+
+**Definición (Activo riesgoso)** Definimos el precio de un activo (riesgoso) que no paga dividendos como el proceso estocástico $\{S(t)\}_{t\in \mathbb{T}}$, el cual sigue un movimiento Browniano geométrico con la siguiente ecuación diferencial estocástica (EDE)
+$$dS(t)=\mu S(t)dt+\sigma S(t)dW(t), \label{C1:d_S_mu}$$
+donde $\{W(t)\}_{t\in\mathbb{T}}$ es un movimiento Browniano definido sobre el espacio de probabilidad filtrado $(\Omega, \mathcal{F}, \mathbb{P}, \{\mathcal{F}_t \}_{t\in\mathbb{T}})$, con $\{\mathcal{F}_t\}_{t\in\mathbb{T}}$ la filtración natural del movimiento Browniano y la medida de probabilidad $\mathbb{P}$, la cual llamamos *medida real*, es con la cual medimos los movimientos del activo de riesgo. A la constante $\mu$ le llamamos la *tendencia* (drift) y a $\sigma$ le llamamos la *volatilidad*.
+
+El proceso $S(t)$ también se puede expresar de la siguiente manera 
+$$S(t)=S(0)\exp\left\lbrace \left( \mu - \frac{1}{2}\sigma^2\right)t + \sigma W(t) \right\rbrace$$
+y además, $S(t)=S(0)e^X$ donde bajo $\mathbb{P}$, $X\sim N\left( \left( \mu - \frac{1}{2}\sigma^2\right)t, \sigma^2 t  \right) $.\\
+
+**Definición (Derivado Financiero)**
+Un instrumento financiero derivado es un contrato entre dos partes (una posición larga y una posición corta) cuyo precio depende del precio de otro activo llamado activo subyacente.
+
+Los derivados pueden clasificarse de diversas maneras, principalmente se clasifican por el momento en el que los contratos pueden ser ejercidos; si la decisión de ser ejercido se da a vencimiento $T$, se dice que es de tipo *europeo*, si el contrato puede ejercerse en cualquier instante $t\in \mathbb{T}$, se dice que es de tipo *americano* y si el valor del contrato depende de la trayectoria recorrida por el subyacente, diremos que es una opción *exótica*. En este trabajo nos enfocaremos en derivados de tipo europeo, en particular en opciones call y put, cuyas definiciones se presentan a continuación.
+
+**Definición (Forward)**
+Un forward es un derivado, donde la posición larga se compromete a comprar en una fecha futura $T$ (vencimiento) una unidad de subyacente a la posición corta a un precio (strike) $K$ pactado desde el inicio del contrato.
+
+**Definición (Call Europeo)**
+Una opción call es un derivado que brinda a la posición larga el derecho, mas no la obligación, de comprar a vencimiento $T$ una unidad de subyacente a la posición corta a un precio (strike) $K$ pactado al inicio del contrato.
+
+**Definición (Put Europeo)**
+Una opción call es un derivado que brinda a la posición larga el derecho, mas no la obligación, de vender a vencimiento $T$ una unidad de subyacente a la posición corta a un precio (strike) $K$ pactado al inicio del contrato.
+
+De las definiciones anteriores podemos pensar en los derivados como un juego de suma cero entre la posición larga y la posición corta, es decir, lo que uno gana, el otro lo pierde. Por lo tanto, siempre analizaremos los flujos de efectivo desde la posición larga, y los correspondientes flujos de efectivo de la posición corta serán los de la posición larga con signo opuesto.
+
+Para ejemplificar las definiciones anteriores haremos uso de la Figura \ref{fig:Browniano} y denotaremos a $S(t)$ como el valor del subyacente a tiempo $t$, el cual puede ser el valor de cualquier activo riesgoso, ya sea acción, commodity, tipo de cambio, índice de precios, etc. y este se modela a través de un movimiento Browniano geométrico como se mencionó en la Definición 1.1.2.\\
+
+
 # El modelo de Black-Scholes
 
 El modelo de Black-Scholes (B-S) fue propuesto por el físico y economista Fischer Black y el economista Myron Scholes y posteriormente fue formalizado a través del cálculo estocástico por Robert Merton. El modelo brinda el precio de una opción financiera el cual está dado por la ecuación
@@ -210,9 +220,7 @@ dS(t)=(r-q)S(t)dt+\sigma d\widetilde{W}(t),
 donde $\widetilde{W}(t)$ es un movimiento browniano bajo $\mathbb{\widetilde{P}}$.
 
 El precio de la opción está dado por la fórmula de valuación de riesgo neutral
-\begin{equation}
-\mathbb{\widetilde{E}}(e^{-r(T-t)}X(T)\mid \mathcal{F}_t)
-\end{equation}
+$$ \mathbb{\widetilde{E}}(e^{-r(T-t)}X(T)\mid \mathcal{F}_t)$$
 donde la esperanza se calcula bajo $\mathbb{\widetilde{P}}$, $N(x)$ es la función de distribución de una $N(0,1)$ y $X(T)$ es el payoff del derivado.
 
 ```{r}
@@ -297,6 +305,15 @@ p4 <- ggplot(Grafica,aes(x=Subyacente,y=Payoff)) +
 
 ggarrange(p1,p2,p3,p4,ncol = 2,nrow = 2)
 ```
+
+Puesto que el enfoque de este trabajo son las opciones de tipo de cambio, presentaremos el modelo de B-S para opciones de tipo de cambio (también conocido como modelo de Garman-Kohlhagen) donde se incorpora una tasa libre de riesgo extranjera $r_f$ (la cual puede verse como incluir dividendos en el subyacente a tasa continua), mientras que $r_d$ representará la tasa libre de riesgo local. El subyacente en este caso será el tipo de cambio $S(t)$ para los pares XXXYYY, donde XXX es la divisa extranjera (por ejemplo USD), y YYY representa la divisa local (por ejemplo MXN), entendiéndose que una unidad de moneda extranjera XXX a tiempo $t$ vale $S(t)$ unidades de moneda local YYY.
+Debido a la existencia de la tasa extranjera, si el día de hoy compraramos una unidad de moneda extranjera $S(0)$, a tiempo $t$ el activo valdría $e^{r_ft}S(t)$ unidades de la moneda local. Si denotamos por $Y(t)=e^{r_ft}S(t)$, el cual representa el valor de la cuenta de mercado de dinero extranjera en moneda local, entonces usando la dinámica del tipo de cambio $S(t)$ y la regla del producto de Itô encontramos que 
+\begin{align*}
+dY(t) &= e^{r_ft}dS(t)+S(t)de^{r_ft} \\
+&= e^{r_ft}(\mu S(t)dt+\sigma S(t)dW(t))+r_fe^{r_ft}S(t)dt
+\end{align*}
+
+Por lo tanto $$dY(t)=(\mu + r_f)Y(t)dt+\sigma Y(t)dW(t)$$
 
 # Bibliografía
 
